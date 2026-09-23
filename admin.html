@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Админка — шаблоны документов</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <nav><a href="index.html">← На сайт</a></nav>
+  <h1>Админка шаблонов</h1>
+  <div class="sub">Здесь можно создавать шаблоны и публиковать их прямо в репозиторий GitHub</div>
+
+  <div class="warn">
+    Токен GitHub хранится только в памяти вашего браузера (localStorage) и никуда, кроме api.github.com, не отправляется.
+    Используйте fine‑grained токен с доступом только к этому репозиторию (Contents: Read and write). Не открывайте эту страницу на чужих устройствах, пока токен сохранён.
+  </div>
+
+  <fieldset>
+    <legend>Подключение к репозиторию</legend>
+    <div class="row">
+      <div><label>Владелец (user/org)</label><input id="gh_owner" placeholder="напр. ivanov"></div>
+      <div><label>Репозиторий</label><input id="gh_repo" placeholder="напр. docs-site"></div>
+    </div>
+    <div class="row">
+      <div><label>Ветка</label><input id="gh_branch" placeholder="main" value="main"></div>
+      <div><label>Путь к файлу шаблонов</label><input id="gh_path" placeholder="templates.json" value="templates.json"></div>
+    </div>
+    <label>Personal Access Token</label>
+    <input id="gh_token" type="password" placeholder="ghp_...">
+    <div class="row" style="margin-top:10px">
+      <button onclick="saveSettings()">Сохранить настройки</button>
+      <button class="secondary" onclick="loadFromGithub()">Загрузить из GitHub</button>
+    </div>
+    <div id="ghMsg" class="msg"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Список шаблонов</legend>
+    <div id="tplList"></div>
+    <button class="block" onclick="newTemplate()">+ Новый шаблон</button>
+  </fieldset>
+
+  <fieldset id="editor" style="display:none">
+    <legend>Редактор шаблона</legend>
+    <label>Название документа</label>
+    <input id="e_title" placeholder="напр. Постановление о начале служебной проверки">
+    <label>Идентификатор (латиницей, без пробелов)</label>
+    <input id="e_id" placeholder="sluzhebka-nachalo">
+
+    <label>Поля формы</label>
+    <div id="fieldsList"></div>
+    <button class="secondary" onclick="addField()">+ Добавить поле</button>
+
+    <label style="margin-top:16px">Текст документа (HTML), вставляйте поля как {{id_поля}}</label>
+    <textarea id="e_body" class="code" placeholder="<p>Текст с плейсхолдером {{date}}</p>"></textarea>
+
+    <div class="row" style="margin-top:12px">
+      <button onclick="saveTemplateLocal()">Сохранить в списке</button>
+      <button class="secondary" onclick="closeEditor()">Отмена</button>
+    </div>
+  </fieldset>
+
+  <button class="block" onclick="publishToGithub()">Опубликовать все шаблоны на GitHub</button>
+  <div id="pubMsg" class="msg"></div>
+</div>
+
+<script>
+let templates = [];
+let sha = null;
+let editingIndex = null;
+
+function loadSettings(){
+  const s = JSON.parse(localStorage.getItem('gh_settings')||'{}');
+  document.getElementById('gh_owner').value = s.owner||'';
+  document.getElementById('gh_repo').value = s.repo||'';
+  document.getElementById('gh_branch').value = s.branch||'main';
+  document.getElementById('gh_path').value = s.path||'templates.json';
+  document.getElementById('gh_token').value = s.token||'';
+}
+function saveSettings(){
+  const s = {
+    owner: document.getElementById('gh_owner').value.trim(),
+    repo: document.getElementById('gh_repo').value.trim(),
+    branch: document.getElementById('gh_branch').value.trim()||'main',
+    path: document.getElementById('gh_path').value.trim()||'templates.json',
+    token: document.getElementById('gh_token').value.trim()
+  };
+  localStorage.setItem('gh_settings', JSON.stringify(s));
+  document.getElementById('ghMsg').textContent = 'Настройки сохранены.';
+}
+function getSettings(){
+  return {
+    owner: document.getElementById('gh_owner').value.trim(),
+    repo: document.getElementById('gh_repo').value.trim(),
+    branch: document.getElementById('gh_branch').value.trim()||'main',
+    path: document.getElementById('gh_path').value.trim()||'templates.json',
+    token: document.getElementById('gh_token').value.trim()
+  };
+}
+
+async function loadFromGithub(){
+  const s = getSettings();
+  const msg = document.getElementById('ghMsg');
+  if(!s.owner||!s.repo||!s.token){ msg.textContent='Заполните владельца, репозиторий и токен.'; return; }
+  msg.textContent = 'Загружаем…';
+  try{
+    const url = `https://api.github.com/repos/${s.owner}/${s.repo}/contents/${s.path}?ref=${s.branch}`;
+    const res = await fetch(url, {headers:{Authorization:`token ${s.token}`, Accept:'application/vnd.github+json'}});
+    if(res.status===404){ templates=[]; sha=null; msg.textContent='Файл не найден в репозитории — начните с нового шаблона.'; renderTplList(); return; }
+    if(!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    sha = data.sha;
+    const decoded = decodeURIComponent(escape(atob(data.content)));
+    templates = JSON.parse(decoded);
+    msg.textContent = `Загружено шаблонов: ${templates.length}`;
+    renderTplList();
+  }catch(e){
+    msg.textContent = 'Ошибка загрузки. Проверьте настройки и токен.';
+    console.error(e);
+  }
+}
+
+async function publishToGithub(){
+  const s = getSettings();
+  const msg = document.getElementById('pubMsg');
+  if(!s.owner||!s.repo||!s.token){ msg.textContent='Заполните настройки подключения выше.'; return; }
+  msg.textContent = 'Публикуем…';
+  try{
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(templates, null, 2))));
+    const url = `https://api.github.com/repos/${s.owner}/${s.repo}/contents/${s.path}`;
+    const body = {
+      message: 'Обновление шаблонов документов',
+      content,
+      branch: s.branch
+    };
+    if(sha) body.sha = sha;
+    const res = await fetch(url, {
+      method:'PUT',
+      headers:{Authorization:`token ${s.token}`, Accept:'application/vnd.github+json'},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.message||res.status);
+    sha = data.content.sha;
+    msg.textContent = 'Опубликовано. Через минуту изменения появятся на сайте.';
+  }catch(e){
+    msg.textContent = 'Ошибка публикации: '+e.message;
+    console.error(e);
+  }
+}
+
+function renderTplList(){
+  const list = document.getElementById('tplList');
+  list.innerHTML = '';
+  if(!templates.length){ list.innerHTML = '<p class="msg">Пока нет шаблонов.</p>'; return; }
+  templates.forEach((t,i)=>{
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `<span class="tpl-title">${t.title}</span>`;
+    const editBtn = document.createElement('button');
+    editBtn.textContent = 'Изменить'; editBtn.onclick = ()=>editTemplate(i);
+    const delBtn = document.createElement('button');
+    delBtn.textContent = 'Удалить'; delBtn.className='secondary';
+    delBtn.onclick = ()=>{ if(confirm('Удалить шаблон «'+t.title+'»?')){ templates.splice(i,1); renderTplList(); } };
+    div.appendChild(editBtn); div.appendChild(delBtn);
+    list.appendChild(div);
+  });
+}
+
+let currentFields = [];
+
+function newTemplate(){
+  editingIndex = null;
+  document.getElementById('e_title').value='';
+  document.getElementById('e_id').value='';
+  document.getElementById('e_body').value='';
+  currentFields = [];
+  renderFieldsList();
+  document.getElementById('editor').style.display='block';
+}
+
+function editTemplate(i){
+  editingIndex = i;
+  const t = templates[i];
+  document.getElementById('e_title').value = t.title;
+  document.getElementById('e_id').value = t.id;
+  document.getElementById('e_body').value = t.body;
+  currentFields = JSON.parse(JSON.stringify(t.fields));
+  renderFieldsList();
+  document.getElementById('editor').style.display='block';
+}
+
+function closeEditor(){ document.getElementById('editor').style.display='none'; }
+
+function addField(){
+  currentFields.push({id:'', label:'', placeholder:'', type:'text'});
+  renderFieldsList();
+}
+
+function renderFieldsList(){
+  const wrap = document.getElementById('fieldsList');
+  wrap.innerHTML = '';
+  currentFields.forEach((f,i)=>{
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.marginBottom = '6px';
+    row.innerHTML = `
+      <div><input placeholder="id (лат.)" value="${f.id}" onchange="currentFields[${i}].id=this.value"></div>
+      <div><input placeholder="Подпись поля" value="${f.label}" onchange="currentFields[${i}].label=this.value"></div>
+      <div><select onchange="currentFields[${i}].type=this.value">
+        <option value="text" ${f.type!=='textarea'?'selected':''}>Строка</option>
+        <option value="textarea" ${f.type==='textarea'?'selected':''}>Текст (многострочный)</option>
+      </select></div>
+      <button class="secondary" onclick="insertField(${i})" type="button">Вставить {{}}</button>
+      <button class="secondary" onclick="currentFields.splice(${i},1);renderFieldsList()" type="button">✕</button>
+    `;
+    wrap.appendChild(row);
+  });
+}
+
+function insertField(i){
+  const id = currentFields[i].id.trim();
+  if(!id) return;
+  const ta = document.getElementById('e_body');
+  const pos = ta.selectionStart || ta.value.length;
+  ta.value = ta.value.slice(0,pos) + '{{'+id+'}}' + ta.value.slice(pos);
+  ta.focus();
+}
+
+function saveTemplateLocal(){
+  const title = document.getElementById('e_title').value.trim();
+  const id = document.getElementById('e_id').value.trim();
+  const body = document.getElementById('e_body').value;
+  if(!title||!id||!body){ alert('Заполните название, идентификатор и текст документа.'); return; }
+  const tpl = {id, title, fields: currentFields.filter(f=>f.id&&f.label), body};
+  if(editingIndex===null) templates.push(tpl); else templates[editingIndex]=tpl;
+  renderTplList();
+  closeEditor();
+}
+
+loadSettings();
+renderTplList();
+</script>
+</body>
+</html>

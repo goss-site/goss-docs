@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Конструктор документов</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/docshift@latest/dist/docshift.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav><a href="admin.html">Админка →</a></nav>
+  <h1>Конструктор документов</h1>
+  <div class="sub">Выберите шаблон, заполните поля и скачайте готовый .docx</div>
+
+  <div id="list"></div>
+
+  <div id="formArea" style="display:none">
+    <fieldset>
+      <legend id="tplTitle"></legend>
+      <form id="f"></form>
+      <button class="block" id="genBtn">Сформировать и скачать документ</button>
+      <div id="msg" class="msg"></div>
+    </fieldset>
+    <button class="secondary" onclick="showList()">← К списку шаблонов</button>
+  </div>
+</div>
+
+<script>
+let templates = [];
+let current = null;
+
+async function load(){
+  try{
+    const res = await fetch('templates.json', {cache:'no-store'});
+    templates = await res.json();
+  }catch(e){
+    document.getElementById('list').innerHTML = '<p class="msg">Не удалось загрузить список шаблонов.</p>';
+    return;
+  }
+  renderList();
+}
+
+function renderList(){
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  if(!templates.length){ list.innerHTML = '<p class="msg">Шаблонов пока нет. Добавьте их в админке.</p>'; return; }
+  templates.forEach(t=>{
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `<span class="tpl-title">${t.title}</span>`;
+    const btn = document.createElement('button');
+    btn.textContent = 'Заполнить';
+    btn.onclick = ()=> openTemplate(t.id);
+    div.appendChild(btn);
+    list.appendChild(div);
+  });
+}
+
+function openTemplate(id){
+  current = templates.find(t=>t.id===id);
+  if(!current) return;
+  document.getElementById('list').style.display='none';
+  document.getElementById('formArea').style.display='block';
+  document.getElementById('tplTitle').textContent = current.title;
+  const f = document.getElementById('f');
+  f.innerHTML = '';
+  current.fields.forEach(fld=>{
+    const label = document.createElement('label');
+    label.textContent = fld.label;
+    const input = fld.type === 'textarea' ? document.createElement('textarea') : document.createElement('input');
+    input.id = 'fld_'+fld.id;
+    input.placeholder = fld.placeholder || '';
+    input.required = true;
+    f.appendChild(label);
+    f.appendChild(input);
+  });
+  document.getElementById('msg').textContent = '';
+}
+
+function showList(){
+  document.getElementById('formArea').style.display='none';
+  document.getElementById('list').style.display='block';
+}
+
+function escapeHtml(s){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+document.getElementById('genBtn').addEventListener('click', async ()=>{
+  const msg = document.getElementById('msg');
+  const values = {};
+  for(const fld of current.fields){
+    const el = document.getElementById('fld_'+fld.id);
+    if(!el.value.trim()){ msg.textContent = 'Заполните все поля.'; return; }
+    values[fld.id] = escapeHtml(el.value.trim());
+  }
+  let body = current.body;
+  for(const k in values){
+    body = body.split('{{'+k+'}}').join(values[k]);
+  }
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="font-family:'Times New Roman',serif;font-size:14pt;line-height:1.4;">${body}</body></html>`;
+
+  msg.textContent = 'Формируем документ…';
+  try{
+    const blob = await docshift.toDocx(html);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = current.title.replace(/[^\wа-яА-ЯёЁ\- ]/g,'').trim() + '.docx';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    msg.textContent = 'Документ скачан.';
+  }catch(e){
+    msg.textContent = 'Не удалось сформировать документ.';
+    console.error(e);
+  }
+});
+
+load();
+</script>
+</body>
+</html>
