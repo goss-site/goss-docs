@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Бланки документов</title>
+<style>
+:root{--ink:#101a2b;--paper:#f8f9fb;--text:#1a2233;--mute:#667085;--line:#d5dae2;--gold:#a8843f;--navy:#1d3557}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;color:var(--text);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+background:radial-gradient(1200px 500px at 50% -10%,#24406b 0,transparent 70%),var(--ink)}
+.sheet{max-width:780px;margin:32px auto;background:var(--paper);border-top:6px solid var(--gold);box-shadow:0 30px 80px rgba(0,0,0,.45);padding:8px 44px 48px}
+header{text-align:center;padding:24px 0 20px;border-bottom:1px solid var(--line)}
+header img{width:230px;max-width:60%;display:block;margin:0 auto 8px}
+h1{font:700 27px/1.25 Georgia,"Times New Roman",serif;letter-spacing:.02em;margin:0}
+.sub{color:var(--mute);margin:6px 0 0;font-size:15px}
+.step{display:grid;grid-template-columns:40px 1fr;gap:0 16px;margin-top:32px}
+.num{width:40px;height:40px;border-radius:50%;border:1.5px solid var(--gold);color:var(--gold);display:grid;place-items:center;font:700 18px Georgia,serif}
+h2{font:700 20px Georgia,"Times New Roman",serif;margin:6px 0 14px}
+.docs{display:grid;gap:10px}
+.doc{text-align:left;width:100%;padding:14px 16px;background:#fff;border:1px solid var(--line);border-left:4px solid var(--line);border-radius:3px;cursor:pointer;font:inherit;color:inherit;transition:border-color .15s,box-shadow .15s}
+.doc b{display:block;font:700 16px Georgia,serif}
+.doc span{color:var(--mute);font-size:14px}
+.doc[aria-pressed=true]{border-color:var(--navy);border-left-color:var(--gold);box-shadow:0 4px 14px rgba(29,53,87,.14)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px}
+.full{grid-column:1/-1}
+label{display:block;font-weight:600;font-size:14px;color:var(--navy)}
+input[type=text],input[type=date],input[type=time],textarea{display:block;width:100%;margin-top:5px;padding:10px 12px;font:inherit;font-weight:400;color:var(--text);background:#fff;border:1px solid var(--line);border-radius:3px;transition:border-color .15s,box-shadow .15s}
+textarea{min-height:120px;resize:vertical}
+input:focus,textarea:focus,button:focus-visible,.drop:focus-within{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px rgba(29,53,87,.18)}
+.imgs{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.drop{border:1.5px dashed #aab3c0;border-radius:4px;background:#fff;padding:14px;text-align:center;position:relative}
+.drop input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.thumb{height:96px;margin:8px 0;display:grid;place-items:center;border-radius:3px;font-size:14px;color:var(--mute);
+background:repeating-conic-gradient(#eceff3 0 25%,#fff 0 50%) 0 0/16px 16px}
+.thumb img{max-width:100%;max-height:96px}
+.chk{display:flex;gap:8px;align-items:center;font-weight:400;font-size:14px;color:var(--text);margin-top:6px;position:relative;z-index:1}
+.go{margin-top:36px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:24px}
+button.main{padding:14px 30px;font:700 16px system-ui,sans-serif;color:#fff;background:var(--navy);border:0;border-radius:3px;cursor:pointer;transition:background .15s}
+button.main:hover{background:#142743}
+button.main:disabled{opacity:.6;cursor:wait}
+#msg{color:var(--mute);font-size:15px}#msg.err{color:#a3261d}
+@media(max-width:640px){.sheet{margin:0;padding:4px 18px 36px}.grid,.imgs{grid-template-columns:1fr}.step{grid-template-columns:1fr}.num{margin-bottom:8px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header>
+    <img src="assets/emblem.png" alt="Герб">
+    <h1>Бланки документов</h1>
+    <p class="sub">Выберите документ, заполните поля — и скачайте готовый файл Word.</p>
+  </header>
+  <div class="step"><div class="num">1</div><div><h2>Документ</h2><div class="docs" id="docs"></div></div></div>
+  <div class="step"><div class="num">2</div><div><h2>Данные</h2><div class="grid" id="fields"></div></div></div>
+  <div class="step" id="imgSec"><div class="num">3</div><div><h2>Подпись и печать</h2><div class="imgs" id="imgs"></div></div></div>
+  <div class="go"><button class="main" id="go" type="button">Скачать документ (.docx)</button><span id="msg" role="status"></span></div>
+</div>
+<script src="lib/jszip.min.js"></script>
+<script src="templates.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const NS = {
+  w:'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+  wp:'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',
+  a:'http://schemas.openxmlformats.org/drawingml/2006/main',
+  pic:'http://schemas.openxmlformats.org/drawingml/2006/picture',
+  r:'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+};
+const XMLNS = 'http://www.w3.org/XML/1998/namespace';
+const TOK = /\{\{([\s\S]+?)\}\}/g;
+const DEF = { 'подпись':{widthCm:3,dxCm:.8,dyCm:0}, 'печать':{widthCm:4,dxCm:-1.5,dyCm:-.2} };
+const MON = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+const EMU = 360000;
+let cur, FIELDS, IMGS;
+
+const msg = (t, err) => { const m = $('#msg'); m.textContent = t || ''; m.className = err ? 'err' : ''; };
+const parse = s => new DOMParser().parseFromString(s, 'application/xml');
+const paras = d => [...d.getElementsByTagNameNS(NS.w, 'p')];
+const tsOf = p => [...p.getElementsByTagNameNS(NS.w, 't')];
+const partNames = z => Object.keys(z.files).filter(n => /^word\/(document|header\d*|footer\d*)\.xml$/.test(n));
+const openZip = () => JSZip.loadAsync(cur.data, { base64: true });
+const tok = x => {
+  x = x.trim();
+  if (x[0] === '@') return { img: x.slice(1).trim().toLowerCase() };
+  const [l, t] = x.split('|');
+  return { label: l.trim(), type: (t || 'text').trim() };
+};
+const fmt = (v, type) => {
+  if (!v) return '';
+  if (type === 'date' || type === 'datelong') {
+    const [y, m, d] = v.split('-');
+    return type === 'date' ? `${d}.${m}.${y}` : `${+d} ${MON[m - 1]} ${y} г.`;
+  }
+  return v;
+};
+
+async function scan(z) {
+  const F = new Map(), I = new Set();
+  for (const n of partNames(z)) {
+    const d = parse(await z.file(n).async('string'));
+    for (const p of paras(d)) {
+      const s = tsOf(p).map(t => t.textContent).join('');
+      for (const m of s.matchAll(TOK)) {
+        const k = tok(m[1]);
+        if (k.img) I.add(k.img); else if (!F.has(k.label)) F.set(k.label, k.type);
+      }
+    }
+  }
+  return { F, I };
+}
+
+function drawingXml(rid, id, w, h, dx, dy) {
+  return `<w:drawing xmlns:w="${NS.w}" xmlns:wp="${NS.wp}" xmlns:a="${NS.a}" xmlns:pic="${NS.pic}" xmlns:r="${NS.r}">
+<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="${251660000 + id}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">
+<wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="character"><wp:posOffset>${dx}</wp:posOffset></wp:positionH>
+<wp:positionV relativeFrom="line"><wp:posOffset>${dy}</wp:posOffset></wp:positionV>
+<wp:extent cx="${w}" cy="${h}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>
+<wp:docPr id="${id}" name="Player image ${id}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>
+<a:graphic><a:graphicData uri="${NS.pic}"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="img${id}"/><pic:cNvPicPr/></pic:nvPicPr>
+<pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing>`;
+}
+
+// Заменяет {{токены}}; токен может быть разбит на несколько <w:t>.
+function fill(d, val, imgs, ctr) {
+  const keep = t => t.setAttributeNS(XMLNS, 'xml:space', 'preserve');
+  const mk = txt => { const t = d.createElementNS(NS.w, 'w:t'); keep(t); t.textContent = txt; return t; };
+  for (const p of paras(d)) {
+    const ts = tsOf(p); if (!ts.length) continue;
+    const lens = [], st = []; let full = '';
+    ts.forEach(t => { st.push(full.length); lens.push(t.textContent.length); full += t.textContent; });
+    const ms = [...full.matchAll(TOK)];
+    const at = pos => { for (let i = ts.length - 1; i >= 0; i--) if (lens[i] && st[i] <= pos) return i; return 0; };
+    for (let k = ms.length - 1; k >= 0; k--) {
+      const m = ms[k], s = m.index, e = s + m[0].length, si = at(s), ei = at(e - 1);
+      const a = ts[si], b = ts[ei];
+      const before = a.textContent.slice(0, s - st[si]), after = b.textContent.slice(e - st[ei]);
+      for (let i = si + 1; i < ei; i++) ts[i].textContent = '';
+      const kk = tok(m[1]), ins = []; let first = '';
+      if (kk.img) {
+        const im = imgs[kk.img];
+        if (im) {
+          const w = Math.round(im.cfg.widthCm * EMU), h = Math.round(w * im.ratio);
+          const dx = Math.round(im.cfg.dxCm * EMU - w / 2);
+          const dy = Math.round(.3 * EMU + im.cfg.dyCm * EMU - h / 2);
+          ins.push(d.importNode(parse(drawingXml(im.rid, 9000 + ctr.n++, w, h, dx, dy)).documentElement, true));
+        }
+      } else {
+        const lines = fmt(val[kk.label], FIELDS.get(kk.label)).split('\n');
+        first = lines[0];
+        lines.slice(1).forEach(l => { ins.push(d.createElementNS(NS.w, 'w:br'), mk(l)); });
+      }
+      if (si === ei) { if (after) ins.push(mk(after)); } else { b.textContent = after; keep(b); }
+      a.textContent = before + first; keep(a);
+      let ref = a;
+      ins.forEach(x => { ref.parentNode.insertBefore(x, ref.nextSibling); ref = x; });
+    }
+  }
+}
+
+async function prepImage(file, clean) {
+  const bmp = await createImageBitmap(file);
+  const sc = Math.min(1, 700 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * sc); c.height = Math.round(bmp.height * sc);
+  const x = c.getContext('2d'); x.drawImage(bmp, 0, 0, c.width, c.height);
+  if (clean) {
+    const id = x.getImageData(0, 0, c.width, c.height), px = id.data;
+    for (let i = 0; i < px.length; i += 4) {
+      const m = Math.min(px[i], px[i + 1], px[i + 2]);
+      const al = m >= 235 ? 0 : m <= 180 ? 255 : Math.round(255 * (235 - m) / 55);
+      px[i + 3] = Math.min(px[i + 3], al);
+    }
+    x.putImageData(id, 0, 0);
+  }
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), ratio: c.height / c.width, url: URL.createObjectURL(blob) };
+}
+
+const cache = {};      // обработанные картинки для предпросмотра и сборки
+async function refreshImg(name) {
+  const f = document.querySelector(`[data-img="${name}"]`).files[0];
+  const box = document.querySelector(`[data-thumb="${name}"]`);
+  if (!f) { delete cache[name]; box.textContent = 'Файл не выбран'; return; }
+  const clean = document.querySelector(`[data-clean="${name}"]`).checked;
+  cache[name] = await prepImage(f, clean);
+  box.innerHTML = ''; const im = new Image(); im.src = cache[name].url; box.append(im);
+}
+
+async function selectTemplate(i) {
+  cur = window.TEMPLATES[i];
+  document.querySelectorAll('.doc').forEach((b, j) => b.setAttribute('aria-pressed', j === i));
+  const { F, I } = await scan(await openZip());
+  FIELDS = F; IMGS = [...I]; msg('');
+  const box = $('#fields'); box.innerHTML = '';
+  F.forEach((type, label) => {
+    const l = document.createElement('label'); l.append(label);
+    const inp = document.createElement(type === 'textarea' ? 'textarea' : 'input');
+    if (type === 'date' || type === 'datelong') inp.type = 'date';
+    else if (type === 'time') inp.type = 'time';
+    else if (type !== 'textarea') inp.type = 'text';
+    inp.dataset.label = label; l.append(inp);
+    if (type === 'textarea') l.className = 'full';
+    box.append(l);
+  });
+  const ib = $('#imgs'); ib.innerHTML = '';
+  $('#imgSec').hidden = !IMGS.length;
+  IMGS.forEach(name => {
+    const cap = name[0].toUpperCase() + name.slice(1);
+    const d = document.createElement('div'); d.className = 'drop';
+    d.innerHTML = `<b>${cap}</b><div class="thumb" data-thumb="${name}">Файл не выбран</div>
+      <div>Нажмите, чтобы загрузить изображение</div>
+      <input type="file" accept="image/*" data-img="${name}" aria-label="${cap}">
+      <label class="chk"><input type="checkbox" data-clean="${name}" checked> Убрать белый фон</label>`;
+    ib.append(d);
+    d.querySelector('[data-img]').onchange = () => refreshImg(name);
+    d.querySelector('[data-clean]').onchange = () => refreshImg(name);
+  });
+}
+
+async function generate() {
+  const go = $('#go'); go.disabled = true; msg('Собираю документ…');
+  try {
+    const z = await openZip(), val = {};
+    document.querySelectorAll('[data-label]').forEach(i => val[i.dataset.label] = i.value.trim());
+    const imgs = {}; let add = '', i = 0;
+    for (const name of IMGS) {
+      const c = cache[name]; if (!c) continue;
+      const rid = 'rIdPlayer' + (++i), path = `media/player_${i}.png`;
+      z.file('word/' + path, c.bytes);
+      add += `<Relationship Id="${rid}" Type="${NS.r}/image" Target="${path}"/>`;
+      imgs[name] = { rid, ratio: c.ratio, cfg: { ...(DEF[name] || { widthCm: 3, dxCm: 0, dyCm: 0 }), ...((cur.images || {})[name] || {}) } };
+    }
+    if (add) {
+      const rels = await z.file('word/_rels/document.xml.rels').async('string');
+      z.file('word/_rels/document.xml.rels', rels.replace('</Relationships>', add + '</Relationships>'));
+      const ct = await z.file('[Content_Types].xml').async('string');
+      if (!/Extension="png"/i.test(ct)) z.file('[Content_Types].xml', ct.replace('<Override', '<Default Extension="png" ContentType="image/png"/><Override'));
+    }
+    const ctr = { n: 0 };
+    for (const n of partNames(z)) {
+      const d = parse(await z.file(n).async('string'));
+      fill(d, val, n === 'word/document.xml' ? imgs : {}, ctr);
+      z.file(n, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + new XMLSerializer().serializeToString(d));
+    }
+    const blob = await z.generateAsync({ type: 'blob', compression: 'DEFLATE', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = cur.title.replace(/[\\/:*?"<>|]/g, '') + '.docx';
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    msg('Готово — файл скачан.');
+  } catch (e) {
+    console.error(e); msg('Ошибка при сборке документа: ' + e.message, true);
+  }
+  go.disabled = false;
+}
+
+(() => {
+  const L = window.TEMPLATES || [];
+  if (!L.length) { msg('Нет ни одного шаблона документа.', true); return; }
+  L.forEach((t, i) => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'doc';
+    b.innerHTML = `<b></b><span></span>`; b.children[0].textContent = t.title; b.children[1].textContent = t.description || '';
+    b.onclick = () => selectTemplate(i); $('#docs').append(b);
+  });
+  $('#go').onclick = generate;
+  selectTemplate(0);
+})();
+</script>
+</body>
+</html>
